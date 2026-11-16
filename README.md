@@ -38,3 +38,12 @@ Once hosted, share your deployed public URL with participants. Only share the `/
 - For real production use, add rate-limiting, CSRF protections, a password hashing / researcher identity solution, and email verification if required by your institution.
 - Confirm that the experiment length (including setup and reset) is reflected in time slot durations.
 - The system currently doesn't send email notifications or calendar invites; avoid claiming it does.
+
+
+## New scheduling features (v2)
+
+- Public booking page uses a navigable seven-day, Outlook-style week view. Blue events are available, grey are booked. Participant details are never sent to the public calendar.
+- Admin **Gap between sessions (min)** is configurable (0–240, default 30). Example: 60 minute sessions with a 30 minute gap begin at 09:00, 10:30, 12:00. Daily end time limits the *end of the final session* (not the trailing break).
+- Admin **Delete existing sessions** allows deletion of all unbooked slots with a typed `DELETE ALL` confirmation. Check **Also delete booked sessions** to delete all reservations too. This action is irreversible; export your CSV first.
+- Existing SQLite data is kept on deployment; updating code does **not** automatically delete old sessions.
+- GitHub/Railway deployment: upload changed `app.py`, `templates/index.html`, `templates/admin.html`, `static/style.css`, and **new** `static/calendar.js` to the repository, then redeploy. Do not upload a local database or replace the Railway volume.

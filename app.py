@@ -73,7 +73,7 @@ def read_slots(include_past=False):
 
 @app.get('/')
 def index():
-    return render_template('index.html', slots=[s for s in read_slots() if not s['booking_id']], timezone=TZ_NAME)
+    return render_template('index.html', slots=[{'id': s['id'], 'starts_at': s['starts_at'], 'ends_at': s['ends_at'], 'available': not bool(s['booking_id'])} for s in read_slots()], timezone=TZ_NAME)
 
 
 @app.post('/book')
@@ -163,7 +163,8 @@ def add_slots():
         start_time = datetime.strptime(request.form['start_time'], '%H:%M').time()
         end_time = datetime.strptime(request.form['end_time'], '%H:%M').time()
         duration = int(request.form['duration'])
-        if not (1 <= (day_to - day_from).days + 1 <= 90 and 15 <= duration <= 240):
+        gap = int(request.form.get('gap', '30'))
+        if not (1 <= (day_to - day_from).days + 1 <= 90 and 15 <= duration <= 240 and 0 <= gap <= 240):
             raise ValueError('Invalid date range or duration')
         if datetime.combine(day_from, start_time) >= datetime.combine(day_from, end_time):
             raise ValueError('End time must be later than start time')
@@ -179,14 +180,38 @@ def add_slots():
                     start_iso = current.strftime('%Y-%m-%dT%H:%M')
                     end_iso = (current + timedelta(minutes=duration)).strftime('%Y-%m-%dT%H:%M')
                     if current.replace(tzinfo=TZ) > datetime.now(TZ):
-                        exists = conn.execute('SELECT 1 FROM slots WHERE starts_at < ? AND ends_at > ?', (end_iso, start_iso)).fetchone()
+                        # A buffer is required between this session and existing sessions.
+                        window_start = (current - timedelta(minutes=gap)).strftime('%Y-%m-%dT%H:%M')
+                        window_end = (current + timedelta(minutes=duration + gap)).strftime('%Y-%m-%dT%H:%M')
+                        exists = conn.execute('SELECT 1 FROM slots WHERE starts_at < ? AND ends_at > ?', (window_end, window_start)).fetchone()
                         if not exists:
                             conn.execute('INSERT INTO slots(starts_at, ends_at) VALUES (?,?)', (start_iso, end_iso))
                             made += 1
-                    current += timedelta(minutes=duration)
+                    current += timedelta(minutes=duration + gap)
         flash(f'{made} new time slots created. Existing overlaps were skipped.', 'success')
     except (ValueError, KeyError) as ex:
         flash(f'Please check your slot settings: {ex}', 'error')
+    return redirect(url_for('admin'))
+
+
+@app.post('/admin/slots/delete-all')
+@admin_only
+def delete_all_slots():
+    if request.form.get('confirmation', '').strip() != 'DELETE ALL':
+        flash('Deletion cancelled. Type DELETE ALL exactly to confirm.', 'error')
+        return redirect(url_for('admin'))
+    include_booked = request.form.get('include_booked') == 'yes'
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        if include_booked:
+            booked_count = conn.execute('SELECT COUNT(*) FROM bookings').fetchone()[0]
+            slot_count = conn.execute('SELECT COUNT(*) FROM slots').fetchone()[0]
+            conn.execute('DELETE FROM bookings')
+            conn.execute('DELETE FROM slots')
+            flash(f'Deleted {slot_count} sessions and {booked_count} bookings. Existing confirmation links are no longer valid.', 'success')
+        else:
+            result = conn.execute('DELETE FROM slots WHERE id NOT IN (SELECT slot_id FROM bookings)')
+            flash(f'Deleted {result.rowcount} unbooked sessions. Booked sessions were preserved.', 'success')
     return redirect(url_for('admin'))
 
 
